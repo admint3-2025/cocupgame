@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "COC UP!",
+    "slug": "cocup",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#FF9500"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cocup.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FF9500"
+      },
+      "package": "com.cocup.app"
+    },
+    "web": {},
+    "extra": {
+      "eas": {
+        "projectId": "72f3b6a1-2b7d-4c82-a2c3-1fb2361385fb"
+      }
+    }
+  }
+}
