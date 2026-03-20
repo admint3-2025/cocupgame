@@ -12,12 +12,13 @@ import {
   ScrollView
 } from 'react-native';
 import { Accelerometer } from 'expo-sensors';
+import { Audio } from 'expo-av';
 import { getRandomWords } from './src/data/words';
 
 const { width, height } = Dimensions.get('window');
 
 export default function App() {
-  const [gameState, setGameState] = useState('menu'); // menu, categories, countdown, playing, finished
+  const [gameState, setGameState] = useState('splash'); // splash, menu, categories, countdown, playing, finished
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [countdown, setCountdown] = useState(3);
   const [currentWord, setCurrentWord] = useState('');
@@ -30,6 +31,7 @@ export default function App() {
   const [accelData, setAccelData] = useState({ x: 0, y: 0, z: 0 });
   const [flashFeedback, setFlashFeedback] = useState(null); // 'correct', 'pass', or null
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showTiltWarning, setShowTiltWarning] = useState(false);
   
   const lastActionTime = useRef(0);
   const gameStateRef = useRef('menu');
@@ -37,6 +39,36 @@ export default function App() {
   const wordIndexRef = useRef(0);
   const rotation = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
+  const rapidChanges = useRef([]);
+  const pausedTimeLeft = useRef(60);
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const loadingProgress = useRef(new Animated.Value(0)).current;
+
+  // Splash screen effect
+  useEffect(() => {
+    if (gameState === 'splash') {
+      // Fade in logo
+      Animated.timing(logoOpacity, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }).start();
+
+      // Animate loading bar
+      Animated.timing(loadingProgress, {
+        toValue: 1,
+        duration: 2500,
+        useNativeDriver: false,
+      }).start();
+
+      // Transition to menu after 2.5 seconds
+      const timer = setTimeout(() => {
+        setGameState('menu');
+      }, 2500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [gameState]);
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -50,16 +82,49 @@ export default function App() {
     wordIndexRef.current = wordIndex;
   }, [wordIndex]);
 
+  // Vibración y sonido para cuenta regresiva
+  const playCountdownBeep = async () => {
+    try {
+      // Configurar el modo de audio
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+      });
+      
+      // Crear y reproducir el beep desde assets
+      const { sound } = await Audio.Sound.createAsync(
+        require('./assets/count2.mp3'),
+        { shouldPlay: true, volume: 1.0 }
+      );
+      
+      // Liberar el sonido después de reproducirlo
+      setTimeout(async () => {
+        try {
+          await sound.unloadAsync();
+        } catch (e) {}
+      }, 500);
+    } catch (error) {
+      console.log('Error reproduciendo beep:', error);
+    }
+    
+    // Vibración campaneante: dos pulsos rápidos
+    Vibration.vibrate([0, 50, 30, 50]);
+  };
+
   useEffect(() => {
     if (gameState === 'countdown' && countdown > 0) {
+      playCountdownBeep(); // Beep campaneante en cada número
       const timer = setTimeout(() => {
         setCountdown(countdown - 1);
       }, 1000);
       return () => clearTimeout(timer);
     } else if (gameState === 'countdown' && countdown === 0) {
-      // Iniciar el juego
-      setGameState('playing');
-      _subscribe();
+      playCountdownBeep(); // Beep en el "¡YA!"
+      // Esperar a que termine el sonido antes de iniciar el juego
+      setTimeout(() => {
+        setGameState('playing');
+        _subscribe();
+      }, 500);
     }
   }, [gameState, countdown]);
 
@@ -164,10 +229,43 @@ export default function App() {
     setShowExitConfirm(false);
   };
 
+  const continueGame = () => {
+    setShowTiltWarning(false);
+    setTimeLeft(pausedTimeLeft.current);
+    setGameState('playing');
+    rapidChanges.current = [];
+    _subscribe();
+  };
+
+  const exitToMenu = () => {
+    setShowTiltWarning(false);
+    setGameState('menu');
+    _unsubscribe();
+  };
+
   const nextWord = () => {
     const currentIndex = wordIndexRef.current;
     const allWords = wordsRef.current;
     console.log('🔄 nextWord llamado. wordIndex actual:', currentIndex, 'total palabras:', allWords.length);
+    
+    // Detectar cambios rápidos (teléfono quedó inclinado)
+    const now = Date.now();
+    rapidChanges.current.push(now);
+    
+    // Mantener solo los últimos 3 segundos de cambios
+    rapidChanges.current = rapidChanges.current.filter(time => now - time < 3000);
+    
+    // Si hay más de 5 cambios en 3 segundos, pausar y advertir
+    if (rapidChanges.current.length > 5) {
+      console.log('⚠️ Demasiados cambios rápidos detectados');
+      pausedTimeLeft.current = timeLeft;
+      setGameState('paused');
+      setShowTiltWarning(true);
+      _unsubscribe();
+      rapidChanges.current = [];
+      return;
+    }
+    
     const nextIndex = currentIndex + 1;
     console.log('🔄 Cambiando palabra:', currentIndex, '->', nextIndex);
     if (nextIndex < allWords.length) {
@@ -187,12 +285,12 @@ export default function App() {
       return;
     }
     
+    // Vibración corta para correcto
+    Vibration.vibrate(150);
+    
     // Mostrar feedback visual verde
     setFlashFeedback('correct');
     setTimeout(() => setFlashFeedback(null), 300);
-    
-    // Vibración más larga para correcto
-    Vibration.vibrate(300);
     
     // Cambiar palabra inmediatamente
     nextWord();
@@ -211,12 +309,12 @@ export default function App() {
       return;
     }
     
+    // Vibración corta doble para pasar
+    Vibration.vibrate([0, 100, 50, 100]);
+    
     // Mostrar feedback visual rojo
     setFlashFeedback('pass');
     setTimeout(() => setFlashFeedback(null), 300);
-    
-    // Vibración doble más larga para pasar
-    Vibration.vibrate([0, 150, 100, 150]);
     
     // Cambiar palabra inmediatamente
     nextWord();
@@ -232,6 +330,37 @@ export default function App() {
     inputRange: [-15, 15],
     outputRange: ['-15deg', '15deg']
   });
+
+  if (gameState === 'splash') {
+    const progressWidth = loadingProgress.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0%', '100%']
+    });
+
+    return (
+      <View style={styles.splashContainer}>
+        <StatusBar barStyle="light-content" />
+        <Animated.View style={[styles.splashLogoContainer, { opacity: logoOpacity }]}>
+          <Image 
+            source={require('./assets/logosf.png')} 
+            style={styles.splashLogo}
+            resizeMode="contain"
+          />
+        </Animated.View>
+        
+        <View style={styles.loadingContainer}>
+          <View style={styles.loadingBarBackground}>
+            <Animated.View 
+              style={[
+                styles.loadingBarFill,
+                { width: progressWidth }
+              ]} 
+            />
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   if (gameState === 'menu') {
     return (
@@ -392,13 +521,6 @@ export default function App() {
           </View>
         </View>
 
-        <TouchableOpacity 
-          style={styles.exitButton}
-          onPress={showExitDialog}
-        >
-          <Text style={styles.exitButtonText}>✕ Salir</Text>
-        </TouchableOpacity>
-
         <View style={styles.wordContainer}>
           <Animated.View 
             style={[
@@ -411,7 +533,16 @@ export default function App() {
               }
             ]}
           >
-            <Text style={styles.wordText}>{currentWord}</Text>
+            <Text style={styles.wordText}>{currentWord?.word || currentWord}</Text>
+            {currentWord?.hints && (
+              <View style={styles.hintsContainer}>
+                {currentWord.hints.map((hint, index) => (
+                  <Text key={index} style={styles.hintText}>
+                    • {hint}
+                  </Text>
+                ))}
+              </View>
+            )}
           </Animated.View>
         </View>
 
@@ -452,6 +583,40 @@ export default function App() {
                   onPress={cancelExit}
                 >
                   <Text style={styles.exitModalButtonText}>Continuar jugando</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  if (gameState === 'paused') {
+    return (
+      <View style={styles.pausedContainer}>
+        <StatusBar barStyle="light-content" />
+        
+        {showTiltWarning && (
+          <View style={styles.warningModal}>
+            <View style={styles.warningContent}>
+              <Text style={styles.warningTitle}>⚠️ Juego Pausado</Text>
+              <Text style={styles.warningMessage}>
+                Se detectaron muchos cambios rápidos.{'\n'}
+                ¿El teléfono quedó inclinado?
+              </Text>
+              <View style={styles.warningButtons}>
+                <TouchableOpacity 
+                  style={[styles.warningButton, styles.continueButton]}
+                  onPress={continueGame}
+                >
+                  <Text style={styles.warningButtonText}>Continuar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.warningButton, styles.exitButton]}
+                  onPress={exitToMenu}
+                >
+                  <Text style={styles.warningButtonText}>Salir al menú</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -517,6 +682,40 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  splashContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  splashLogoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 80,
+  },
+  splashLogo: {
+    width: width * 0.85,
+    height: height * 0.6,
+  },
+  loadingContainer: {
+    position: 'absolute',
+    bottom: 60,
+    width: '60%',
+    alignItems: 'center',
+  },
+  loadingBarBackground: {
+    width: '100%',
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  loadingBarFill: {
+    height: '100%',
+    backgroundColor: 'rgba(78, 205, 196, 0.7)',
+    borderRadius: 2,
+  },
   container: {
     flex: 1,
     backgroundColor: '#5E60CE',
@@ -786,18 +985,25 @@ const styles = StyleSheet.create({
   },
   exitButton: {
     position: 'absolute',
-    top: 10,
+    top: 20,
     right: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    zIndex: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
   exitButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#333',
+    fontSize: 22,
+    fontWeight: '600',
   },
   exitModal: {
     position: 'absolute',
@@ -903,8 +1109,8 @@ const styles = StyleSheet.create({
   },
   wordCard: {
     backgroundColor: '#3840CE',
-    paddingHorizontal: 60,
-    paddingVertical: 80,
+    paddingHorizontal: 30,
+    paddingVertical: 60,
     borderRadius: 40,
     width: width * 0.95,
     minHeight: height * 0.5,
@@ -924,15 +1130,17 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     maxWidth: '100%',
   },
-  hintContainer: {
+  hintsContainer: {
+    marginTop: 15,
     alignItems: 'center',
-    marginBottom: 30,
+    width: '100%',
   },
   hintText: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 16,
+    textAlign: 'center',
+    marginVertical: 2,
+    paddingHorizontal: 5,
   },
   hintSubtext: {
     color: 'rgba(255,255,255,0.8)',
@@ -1118,4 +1326,71 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: 'white',
   },
-});
+  pausedContainer: {
+    flex: 1,
+    backgroundColor: '#4A4DE8',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  warningModal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  warningContent: {
+    backgroundColor: '#3840CE',
+    borderRadius: 30,
+    padding: 30,
+    width: '90%',
+    maxWidth: 400,
+    alignItems: 'center',
+  },
+  warningTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  warningMessage: {
+    fontSize: 18,
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 15,
+    lineHeight: 26,
+  },
+  warningSubtext: {
+    fontSize: 16,
+    color: '#FFE66D',
+    textAlign: 'center',
+    marginBottom: 25,
+    fontWeight: 'bold',
+  },
+  warningButtons: {
+    width: '100%',
+    gap: 12,
+  },
+  warningButton: {
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    alignItems: 'center',
+    width: '100%',
+  },
+  continueButton: {
+    backgroundColor: '#4ECDC4',
+  },
+  exitButton: {
+    backgroundColor: '#FF6B6B',
+  },
+  warningButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },});

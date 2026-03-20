@@ -5,20 +5,25 @@
     "version": "1.0.0",
     "orientation": "landscape",
     "userInterfaceStyle": "light",
+    "icon": "./assets/logosf.png",
     "splash": {
+      "image": "./assets/logosf.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF9500"
+      "backgroundColor": "#000000"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cocup.app"
+      "bundleIdentifier": "com.cocup.app",
+      "icon": "./assets/logosf.png"
     },
     "android": {
+      "icon": "./assets/logosf.png",
       "adaptiveIcon": {
-        "backgroundColor": "#FF9500"
+        "foregroundImage": "./assets/logosf.png",
+        "backgroundColor": "#000000"
       },
       "package": "com.cocup.app"
     },
